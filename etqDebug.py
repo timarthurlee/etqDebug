@@ -58,6 +58,10 @@ class EtqDebug(object):
         if document is None:
             # No document context to resolve fields, return as is
             return inputString
+
+        if not isinstance(inputString, str):
+            # Input is not a string, return the original input
+            return inputString
         
         if '{' and '}' in inputString:
             # Inline fields detected
