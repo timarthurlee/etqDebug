@@ -122,4 +122,78 @@ class EtqDebug(object):
                 output = [label + ': ' + str(msg)]
 
             for line in output:
-                document.addWarning(line)   
+                document.addWarning(line)  
+
+    def databaseTableInfo(self, tableName, schemaName='dbo', includeRowCount=True, filterOnlyDataSource='FILTER_ONLY', filterName='VAR$FILTER'):
+        """
+        Fetch comprehensive metadata for a table from INFORMATION_SCHEMA.
+        Returns: dict with 'columns', 'indexes', 'constraints', 'rowCount', 'tableName'
+        Note: Optimized for MySQL; adjust for SQL Server if needed.
+        ETQ auto-prefixes table names with environment UUID, so pass the logical table name.
+        """
+        try:
+            info = {
+                'tableName': tableName,
+                'schema': schemaName,
+                'columns': [],
+                'indexes': [],
+                'constraints': [],
+                'rowCount': None
+            }
+            
+            # Fetch columns (MySQL INFORMATION_SCHEMA)
+            columnsQuery = '\n'.join([
+                "SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE, COLUMN_KEY",
+                "FROM INFORMATION_SCHEMA.COLUMNS",
+                "WHERE TABLE_NAME = '{}'".format(tableName),
+                "  AND TABLE_SCHEMA NOT IN ('information_schema', 'mysql', 'performance_schema') AND TABLE_SCHEMA = '{}'".format(schemaName),
+                "ORDER BY ORDINAL_POSITION"
+            ])
+            
+            dao = thisApplication.executeQueryFromDatasource(filterOnlyDataSource, {filterName: columnsQuery})
+            while dao.next():
+                info['columns'].append({
+                    'name': dao.getValue('COLUMN_NAME'),
+                    'type': dao.getValue('DATA_TYPE'),
+                    'maxLength': dao.getValue('CHARACTER_MAXIMUM_LENGTH') or 'N/A',
+                    'nullable': dao.getValue('IS_NULLABLE'),
+                    'key': dao.getValue('COLUMN_KEY') or ''
+                })
+        
+            # Fetch indexes (MySQL)
+            indexesQuery = '\n'.join([
+                "SELECT INDEX_NAME, COLUMN_NAME, SEQ_IN_INDEX",
+                "FROM INFORMATION_SCHEMA.STATISTICS",
+                "WHERE TABLE_NAME = '{}'".format(tableName),
+                "  AND TABLE_SCHEMA NOT IN ('information_schema', 'mysql', 'performance_schema') AND TABLE_SCHEMA = '{}'".format(schemaName),
+                "ORDER BY INDEX_NAME, SEQ_IN_INDEX"
+            ])
+            
+            dao = thisApplication.executeQueryFromDatasource(filterOnlyDataSource, {filterName: indexesQuery})
+            currentIndex = None
+            while dao.next():
+                idxName = dao.getValue('INDEX_NAME')
+                if idxName != currentIndex:
+                    currentIndex = idxName
+                    info['indexes'].append({'name': idxName, 'columns': []})
+                if info['indexes']:
+                    info['indexes'][-1]['columns'].append(dao.getValue('COLUMN_NAME'))
+        
+            # Fetch row count (optional, can be slow on large tables)
+            if includeRowCount:
+                countQuery = '\n'.join([
+                    "SELECT TABLE_ROWS AS rowCount",
+                    "FROM INFORMATION_SCHEMA.TABLES",
+                    "WHERE TABLE_NAME = '{}'".format(tableName),
+                    "  AND TABLE_SCHEMA NOT IN ('information_schema', 'mysql', 'performance_schema') AND TABLE_SCHEMA = '{}'".format(schemaName)
+                ])
+                dao = thisApplication.executeQueryFromDatasource(filterOnlyDataSource, {filterName: countQuery})
+                if dao.next():
+                    info['rowCount'] = dao.getValue('rowCount')
+        
+            self.log(info, "Database table info: {}.{}".format(schemaName, tableName), multiple=True, enabled=True)
+            return info
+    
+        except Exception as e:
+            self.log("Failed to fetch info for {}.{}: {}".format(schemaName, tableName, str(e)), label="databaseTableInfo", enabled=True)
+            return {}
