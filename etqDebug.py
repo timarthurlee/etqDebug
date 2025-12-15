@@ -197,3 +197,83 @@ class EtqDebug(object):
         except Exception as e:
             self.log("Failed to fetch info for {}.{}: {}".format(schemaName, tableName, str(e)), label="databaseTableInfo", enabled=True)
             return {}
+        
+    def profileCode(self, codeOrFunc, *args, **kwargs):
+        """
+        Profiles either a function/method (using runcall) or a string of code (using runctx).
+        Logs the results using the EtqDebug logger.
+        
+        Args:
+            codeOrFunc (str or callable): The code string or function/method to profile.
+            *args: Arguments for the function (if profiling a function).
+            globals (dict, optional): Pass globals() from the calling scope (if profiling a string).
+            locals (dict, optional): Pass locals() from the calling scope (if profiling a string).
+            **kwargs: Keyword arguments for the function (if profiling a function).
+        """        
+        isString = isinstance(codeOrFunc, str)
+        isFunction = not isString and callable(codeOrFunc)
+        
+        if not (isString or isFunction):
+            self.log('codeOrFunc must be either a string or a callable', 'profileCode()')
+            return
+        
+        logLabelPrefix = "ProfilerString" if isString else "ProfilerFunction"
+        logLabel = "{prefix} -> {name}".format(prefix=logLabelPrefix, name='codeBlock' if isString else getattr(codeOrFunc, '__name__', 'codeBlock'))
+
+        # Check if globals/locals were passed in kwargs
+        # We must capture these *before* we potentially execute the code below
+        scopeGlobals = kwargs.pop('globals', {})
+        scopeLocals = kwargs.pop('locals', {})
+
+
+        if not self._enabled:
+            if isString:
+                # Execute normally if profiling is disabled
+                exec(codeOrFunc, scopeGlobals, scopeLocals)
+                return
+            else:
+                return codeOrFunc(*args, **kwargs)
+
+        # --- Imports needed ONLY if self._enabled is True ---    
+        from StringIO import StringIO 
+        import profile
+        import pstats
+
+        self.log("Starting profile run for: {logLabel}".format(logLabel=logLabel), 'Starting profile')
+        pr = profile.Profile()
+        result = None
+        
+        try:
+            if isString:
+                # Handle as a string using runctx() with provided scopes
+                pr.runctx(codeOrFunc, scopeGlobals, scopeLocals)
+            else:
+                # Handle as a function using runcall()
+                result = pr.runcall(codeOrFunc, *args, **kwargs)
+                
+        except Exception as e:
+            self.log("Error during profiled execution: {e}".format(e=str(e)), "ProfilerError")
+            raise
+
+        # --- Stats Capture (shared logic) ---
+        s = StringIO()
+        ps = pstats.Stats(pr, stream=s).sort_stats('cumulative')
+        ps.print_stats()
+        profileStatsString = s.getvalue()
+        statsLines = profileStatsString.strip().split('\n')
+        self.log('\n' + '\n'.join(statsLines), logLabel + " - Profile Results:")
+        
+        return result
+    
+    def profileThis(self, func):
+        """
+        A decorator that profiles a function execution and logs the results 
+        using the EtqDebug logger and the internal profileCode method.
+        """        
+        import functools
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            # This calls the existing profileCode method using 'self' (the debug instance)
+            return self.profileCode(func, *args, **kwargs)
+            
+        return wrapper
