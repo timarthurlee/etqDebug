@@ -70,8 +70,9 @@ class EtqDebug(object):
                 inputString = self._toUnicode(inputString).replace('{'+fieldName+'}', self._getField(fieldName, document) )
         return(inputString)
             
-    def log(self, msg, label=None, multiple = False, enabled=False):
+    def log(self, msg, label=None, multiple = False, enabled=False, document=None):
         if self._enabled or enabled or self._force:
+            document = document if document != None else self._document
             output = []
             if label:
                 label = '{} :: {}'.format(self._label, label)
@@ -97,7 +98,7 @@ class EtqDebug(object):
                     output = [label, msg]
 
             for line in output:
-                Rutilities.debug(self._getFieldsInString(line))
+                Rutilities.debug(self._getFieldsInString(line, document=document))
     
     def alert(self, msg, label=None, multiple = False, document=None, enabled=False):
         if (self._enabled or enabled or self._force) and document is not None:
