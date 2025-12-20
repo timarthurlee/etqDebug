@@ -3,10 +3,15 @@ class EtqDebug(object):
         modes = ['debug', 'info', 'warning', 'error']  
         env = engineConfig.getEnvironmentName()
         isProd = env == 'Production'
-        self._document = document
+        self._document = thisDocument if document is None else document
         self._force = force
         self._enabled = enabled and (not isProd or thisUser.isMember('ADMINISTRATORS',None) or force)
-        self._label = self._getFieldsInString(label) or "EtqDebug"
+        if not label:
+            if self._document is not None:
+                formName = self._document.getFormName()
+                applicationName = self._document.getParentApplication().getName()
+                label = '{} - {} #{}'.format(applicationName, formName, '{ETQ$NUMBER}')
+        self._label = self._getFieldsInString('[DEBUG] ' + label)
 
     def _toUnicode(self, value, encoding='utf-8'):
         """Enhanced unicode conversion with better error handling"""
