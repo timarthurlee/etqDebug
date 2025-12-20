@@ -42,19 +42,22 @@ class EtqDebug(object):
         output = ''
         document = document if document != None else self._document
         field = document.getField(fieldName)
-        if field != None:
-            fieldSetting = field.getSetting()
-            if fieldSetting.getFieldType() in [fieldSetting.FIELD_TYPE_LINK]:
-                links = field.getDocLinks()
-                if links:
-                   output = separator.join(links.getDescription(field.getLocale(), thisUser.getTimeZone()))
-            elif fieldSetting.getFieldType() not in [fieldSetting.FIELD_TYPE_ATTACHMENT]:
-                #if fieldSetting.isMultiValue():
-                #    output = separator.join(field.getEncodedTextList())
-                #else:
-                output = field.getEncodedDisplayText()
-        else:
+        inputString = '{'+fieldName+'}'
+        if field is None or field.getSetting() is None:
             self.log('Invalid fieldname provided.', 'getField:')
+            return inputString       
+        
+        fieldSetting = field.getSetting()             
+        if fieldSetting.getFieldType() in [fieldSetting.FIELD_TYPE_LINK]:
+            links = field.getDocLinks()
+            if not links:
+                return 'No Links'
+            output = separator.join(links.getDescription(field.getLocale(), thisUser.getTimeZone()))
+        elif fieldSetting.getFieldType() not in [fieldSetting.FIELD_TYPE_ATTACHMENT]:
+            #if fieldSetting.isMultiValue():
+            #    output = separator.join(field.getEncodedTextList())
+            #else:
+            output = field.getEncodedDisplayText()
 
         return output
 
@@ -64,7 +67,7 @@ class EtqDebug(object):
             # No document context to resolve fields, return as is
             return inputString
 
-        if not isinstance(inputString, str):
+        if not isinstance(inputString, basestring):
             # Input is not a string, return the original input
             return inputString
         
