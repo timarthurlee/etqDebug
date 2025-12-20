@@ -81,46 +81,38 @@ class EtqDebug(object):
                 inputString = self._toUnicode(inputString).replace('{'+fieldName+'}', self._getField(fieldName, document) )
         return(inputString)
             
-    def _formatMessage(self, msg, label, messageList):
+    def _formatMessage(self, msg, label, messageList, multiple=False):
         """
         Formats a message and label and appends it to the message list.
         If msg is a string, it combines the label and message.
         Otherwise, it appends the label (if any) and the message separately.
-        """
-        if isinstance(msg, basestring) or isinstance(msg, list) or isinstance(msg, dict):
-            if label:
-                messageList.append(label + ': ' + str(msg))
-            else:
-                messageList.append(msg)
+        """        
+        if multiple:
+            # Treat iterable elements as separate messages using new lines
+            multipleList = []
+            try:
+                if isinstance(msg, dict):
+                    for key, value in msg.items():
+                        self._formatMessage(value, key, multipleList)
+                else:
+                    for index, value in enumerate(msg):
+                        self._formatMessage(value, str(index), multipleList)
+            except Exception as e:
+                debug.log("Error formatting multiple message: {}".format(str(e)), "formatMessage")
+            if multipleList:
+                msg = '\n' + '\n'.join(multipleList)
+                
+        if label:
+            messageList.append('{}: {}'.format(label, msg))
         else:
-            if label:
-                messageList.append(label)
-            messageList.append(msg)
+            messageList.append(str(msg))
 
     def log(self, msg, label=None, multiple = False, enabled=False, document=None):
         if self._enabled or enabled or self._force:
-            document = document if document != None else self._document
             output = []
             if label:
                 label = '\n{} :: {}'.format(self._label, label)
-            else:
-                label = self._label
-
-            if multiple and (isinstance(msg, list) or isinstance(msg, dict)):
-                multipleItems = []
-                if label:
-                    multipleItems.append(label)
-
-                if isinstance(msg, dict):                                       
-                    for key, value in msg.items():
-                        self._formatMessage(value, key, multipleItems)
-                        
-                if isinstance(msg, list):  
-                    for index, value in enumerate(msg):
-                        self._formatMessage(value, str(index), multipleItems)
-                output.append('\n'.join(multipleItems)) 
-            else:
-                self._formatMessage(msg, label, output)
+            self._formatMessage(msg, label, output, multiple=multiple)
 
             for line in output:
                 Rutilities.debug(self._getFieldsInString(line, document=document))
