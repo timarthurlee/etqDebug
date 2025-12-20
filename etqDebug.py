@@ -102,21 +102,23 @@ class EtqDebug(object):
             document = document if document != None else self._document
             output = []
             if label:
-                label = '{} :: {}'.format(self._label, label)
+                label = '\n{} :: {}'.format(self._label, label)
             else:
                 label = self._label
 
             if multiple and (isinstance(msg, list) or isinstance(msg, dict)):
+                multipleItems = []
                 if label:
-                    output = ['--{}--'.format(label)]
+                    multipleItems.append(label)
 
-                if label and isinstance(msg, dict):
-                    output.extend([item for key, value in msg.items() for item in [key + ':', value]])
+                if isinstance(msg, dict):                                       
+                    for key, value in msg.items():
+                        self._formatMessage(value, key, multipleItems)
                         
-                if label and isinstance(msg, list):
-                    # output.extend([item for index, value in enumerate(msg) for item in [label + ' - ' + str(index) + ':', value]])      
-                    output.extend([item for index, value in enumerate(msg) for item in ['{} - {}:{}'.format(label,str(index),value)]])      
-                          
+                if isinstance(msg, list):  
+                    for index, value in enumerate(msg):
+                        self._formatMessage(value, str(index), multipleItems)
+                output.append('\n'.join(multipleItems)) 
             else:
                 self._formatMessage(msg, label, output)
 
