@@ -1,14 +1,58 @@
 class EtqDebug(object):
+    LEVEL_ORDER = ['debug', 'info', 'warn', 'error', 'none']
+    LEVEL_MAP = {
+        'debug': {'display': 'DEBUG', 'aliases': ['debug']},
+        'info': {'display': 'INFO', 'aliases': ['info', 'information']},
+        'warn': {'display': 'WARN', 'aliases': ['warn', 'warning']},
+        'error': {'display': 'ERROR', 'aliases': ['error']},
+        'none': {'display': 'NONE', 'aliases': ['none', 'off', 'disabled']}
+    }     
+        env = engineConfig.getEnvironmentName()        
         isProd = env.lower() in ['production', 'prod']
+        
+        # Default minimum level (e.g., from config)
+        if minLevel is None:
+            minLevel = 'debug' if (not isProd or thisUser.isMember('ADMINISTRATORS',None)) else 'error'
+
+        self.setMinLevel(minLevel)
+
         self._document = thisDocument if document is None else document
-        self._force = force
-        self._enabled = enabled and (not isProd or thisUser.isMember('ADMINISTRATORS',None) or force)
+
         if not label:
             if self._document is not None:
                 formName = self._document.getFormName()
                 applicationName = self._document.getParentApplication().getName()
                 label = '{} - {} #{}'.format(applicationName, formName, '{ETQ$NUMBER}')
-        self._label = self._getFieldsInString('[DEBUG] ' + label)
+    def setMinLevel(self, level):
+        """Set the minimum logging level."""
+        self._minLevel = self._normalizeLevel(level)
+
+    def _normalizeLevel(self, level):
+        """Convert 'information' → 'info', return canonical level"""
+        level = level.lower()
+        for canonical, info in self.LEVEL_MAP.items():
+            if level in info['aliases']:
+                return canonical
+        return 'debug'  # default
+    
+    def _getLevelIndex(self, level):
+        """Get numeric index for level comparison."""
+        canonical = self._normalizeLevel(level)
+        try:
+            return self.LEVEL_ORDER.index(canonical)
+        except ValueError:
+            return 0  # default to debug
+        
+    def _shouldLog(self, level):
+        """
+        Determine if a log message at the given level should be emitted.
+        """
+        if self._minLevel == 'none':
+            return False  # Special case: nothing logs
+        
+        callerIdx = self._getLevelIndex(level)
+        minIdx = self._getLevelIndex(self._minLevel)
+        return callerIdx >= minIdx
 
     def _toUnicode(self, value, encoding='utf-8'):
         """Enhanced unicode conversion with better error handling"""
@@ -105,7 +149,7 @@ class EtqDebug(object):
             messageList.append(str(msg))
 
     def log(self, msg, label=None, multiple = False, enabled=False, document=None):
-        if self._enabled or enabled or self._force:
+        if self._shouldLog(level) or enabled:
             output = []
             if label:
                 label = '\n{} :: {}'.format(self._label, label)
@@ -115,7 +159,7 @@ class EtqDebug(object):
                 Rutilities.debug(self._getFieldsInString(line, document=document))
     
     def alert(self, msg, label=None, multiple = False, document=None, enabled=False):
-        if (self._enabled or enabled or self._force) and document is not None:
+        if self._shouldLog(level) or enabled:
             output = []
             if label:
                 label = '{} :: {}'.format(self._label, label)
@@ -241,7 +285,7 @@ class EtqDebug(object):
         scopeLocals = kwargs.pop('locals', {})
 
 
-        if not self._enabled:
+        if not self._shouldLog('debug'):
             if isString:
                 # Execute normally if profiling is disabled
                 exec(codeOrFunc, scopeGlobals, scopeLocals)
@@ -249,7 +293,7 @@ class EtqDebug(object):
             else:
                 return codeOrFunc(*args, **kwargs)
 
-        # --- Imports needed ONLY if self._enabled is True ---    
+        # --- Imports needed ONLY if we are allowed to log ---    
         from StringIO import StringIO 
         import profile
         import pstats
