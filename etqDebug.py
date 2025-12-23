@@ -95,7 +95,7 @@ class EtqDebug(object):
                     for index, value in enumerate(msg):
                         self._formatMessage(value, str(index), multipleList)
             except Exception as e:
-                debug.log("Error formatting multiple message: {}".format(str(e)), "formatMessage")
+                messageList.append('Format error: {}'.format(str(e)))
             if multipleList:
                 msg = '\n' + '\n'.join(multipleList)
                 
