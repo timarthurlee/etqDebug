@@ -1,8 +1,5 @@
 class EtqDebug(object):
-    def __init__(self, label=None, enabled=True, mode='info', force=False, document=None):      
-        modes = ['debug', 'info', 'warning', 'error']  
-        env = engineConfig.getEnvironmentName()
-        isProd = env == 'Production'
+        isProd = env.lower() in ['production', 'prod']
         self._document = thisDocument if document is None else document
         self._force = force
         self._enabled = enabled and (not isProd or thisUser.isMember('ADMINISTRATORS',None) or force)
