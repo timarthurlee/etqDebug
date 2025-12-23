@@ -1,3 +1,4 @@
+import inspect
 class EtqDebug(object):
     LEVEL_ORDER = ['debug', 'info', 'warn', 'error', 'none']
     LEVEL_MAP = {
@@ -7,6 +8,7 @@ class EtqDebug(object):
         'error': {'display': 'ERROR', 'aliases': ['error']},
         'none': {'display': 'NONE', 'aliases': ['none', 'off', 'disabled']}
     }     
+    def __init__(self, label=None, minLevel=None, document=None):              
         env = engineConfig.getEnvironmentName()        
         isProd = env.lower() in ['production', 'prod']
         
@@ -23,6 +25,8 @@ class EtqDebug(object):
                 formName = self._document.getFormName()
                 applicationName = self._document.getParentApplication().getName()
                 label = '{} - {} #{}'.format(applicationName, formName, '{ETQ$NUMBER}')
+        self._label = self._getFieldsInString(label)    
+    
     def setMinLevel(self, level):
         """Set the minimum logging level."""
         self._minLevel = self._normalizeLevel(level)
@@ -121,7 +125,70 @@ class EtqDebug(object):
                     continue
                 inputString = self._toUnicode(inputString).replace('{'+fieldName+'}', self._getField(fieldName, document) )
         return(inputString)
-            
+
+    def _getCallerInfo(self, depth=3):
+        """
+        Retrieves caller information using inspect module.
+        """
+        frame = inspect.currentframe()
+        for _ in range(depth):
+            frame = frame.f_back
+            if frame is None:
+                return ''
+        
+        code = frame.f_code
+
+        # Get class name if available
+        className = ''
+        try:
+            loc = frame.f_locals
+            if 'self' in loc and loc['self'] is not None:
+                className = loc['self'].__class__.__name__
+        except Exception:
+            pass
+
+        if code.co_name == '<module>':
+            return ''
+        
+        # Get parameters
+        try:
+            args, varargs, varkw, localsDict = inspect.getargvalues(frame)
+            funcArgs = {}
+
+            # Positional/named args: skip self instead of including it
+            for name in args:
+                if name == 'self':
+                    continue
+                funcArgs[name] = localsDict.get(name)
+
+            # *args
+            if varargs and varargs != 'self':
+                funcArgs[varargs] = localsDict.get(varargs)
+
+            # **kwargs
+            if varkw and varkw != 'self':
+                funcArgs[varkw] = localsDict.get(varkw)
+        except Exception:
+            funcArgs = {}
+        argString = ', '.join('{}={}'.format(k, repr(v)) for k, v in funcArgs.items())
+
+        lineNumber = frame.f_lineno
+        funcName = code.co_name or ''
+
+        if className:
+            funcName = '{}.{}'.format(className, funcName)
+
+        output = '\n{}() line={}:\n    params: {}'.format(funcName, lineNumber, argString)
+
+        return output
+    
+    def _getMessageHeader(self, level, showCaller=True):
+        levelAlias = self.LEVEL_MAP[level]['display']
+        header = '\n[{}] {}'.format(levelAlias, self._label)     
+        if showCaller:
+            header += self._getCallerInfo()
+        return header
+
     def _formatMessage(self, msg, label, messageList, multiple=False):
         """
         Formats a message and label and appends it to the message list.
@@ -140,45 +207,28 @@ class EtqDebug(object):
                         self._formatMessage(value, str(index), multipleList)
             except Exception as e:
                 messageList.append('Format error: {}'.format(str(e)))
-            if multipleList:
-                msg = '\n' + '\n'.join(multipleList)
-                
-        if label:
-            messageList.append('{}: {}'.format(label, msg))
-        else:
-            messageList.append(str(msg))
 
-    def log(self, msg, label=None, multiple = False, enabled=False, document=None):
+            if multipleList:
+                msg = '\n    ' + '\n    '.join(multipleList)
+                
+        if not label:
+            label = 'msg'
+        messageList.append('    {}: {}'.format(label, msg))
+
+    def log(self, msg, label=None, multiple = False, enabled=False, document=None, level='debug', showCaller=True):
         if self._shouldLog(level) or enabled:
             output = []
-            if label:
-                label = '\n{} :: {}'.format(self._label, label)
+            header = self._getMessageHeader(level=level, showCaller=showCaller)
+
             self._formatMessage(msg, label, output, multiple=multiple)
 
             for line in output:
-                Rutilities.debug(self._getFieldsInString(line, document=document))
+                Rutilities.debug(self._getFieldsInString(header + '\n' + line, document=document))
     
-    def alert(self, msg, label=None, multiple = False, document=None, enabled=False):
+    def alert(self, msg, label=None, multiple = False, document=None, level='debug', enabled=False):
         if self._shouldLog(level) or enabled:
             output = []
-            if label:
-                label = '{} :: {}'.format(self._label, label)
-            else:
-                label = self._label
-
-            if multiple and (isinstance(msg, list) or isinstance(msg, dict)):
-                if label:
-                    output = ['--{}--'.format(label)]
-
-                if label and isinstance(msg, dict):
-                    output.extend([item for key, value in msg.items() for item in [key + ':', value]])
-                        
-                if label and isinstance(msg, list):
-                    # output.extend([item for index, value in enumerate(msg) for item in [label + ' - ' + str(index) + ':', value]])      
-                    output.extend([item for index, value in enumerate(msg) for item in ['{} - {}:{}'.format(label,str(index),value)]])      
-                          
-            else:
-                output = [label + ': ' + str(msg)]
+            self._formatMessage(msg, label, output, multiple=multiple)
 
             for line in output:
                 document.addWarning(line)  
