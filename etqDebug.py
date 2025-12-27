@@ -217,8 +217,12 @@ class EtqDebug(object):
             self.log('codeOrFunc must be either a string or a callable', 'profileCode()')
             return
         
+        logLabelName = kwargs.pop('label', None)
+        if not logLabelName:
+            logLabelName = 'codeBlock' if isString else getattr(codeOrFunc, '__name__', 'codeBlock')
+
         logLabelPrefix = "ProfilerString" if isString else "ProfilerFunction"
-        logLabel = "{prefix} -> {name}".format(prefix=logLabelPrefix, name='codeBlock' if isString else getattr(codeOrFunc, '__name__', 'codeBlock'))
+        logLabel = "{prefix} -> {name}".format(prefix=logLabelPrefix, name=logLabelName)
 
         # Check if globals/locals were passed in kwargs
         # We must capture these *before* we potentially execute the code below
