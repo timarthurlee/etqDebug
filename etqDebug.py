@@ -1,12 +1,62 @@
+import inspect
 class EtqDebug(object):
-    def __init__(self, label=None, enabled=True, mode='info', force=False, document=None):      
-        modes = ['debug', 'info', 'warning', 'error']  
-        env = engineConfig.getEnvironmentName()
-        isProd = env == 'Production'
-        self._document = document
-        self._force = force
-        self._enabled = enabled and (not isProd or thisUser.isMember('ADMINISTRATORS',None) or force)
-        self._label = self._getFieldsInString(label) or "EtqDebug"
+    LEVEL_ORDER = ['debug', 'info', 'warn', 'error', 'none']
+    LEVEL_MAP = {
+        'debug': {'display': 'DEBUG', 'aliases': ['debug']},
+        'info': {'display': 'INFO', 'aliases': ['info', 'information']},
+        'warn': {'display': 'WARN', 'aliases': ['warn', 'warning']},
+        'error': {'display': 'ERROR', 'aliases': ['error']},
+        'none': {'display': 'NONE', 'aliases': ['none', 'off', 'disabled']}
+    }     
+    def __init__(self, label=None, minLevel=None, document=None):              
+        env = engineConfig.getEnvironmentName()        
+        isProd = env.lower() in ['production', 'prod']
+        
+        # Default minimum level (e.g., from config)
+        if minLevel is None:
+            minLevel = 'debug' if (not isProd or thisUser.isMember('ADMINISTRATORS',None)) else 'error'
+
+        self.setMinLevel(minLevel)
+
+        self._document = thisDocument if document is None else document
+
+        if not label:
+            if self._document is not None:
+                formName = self._document.getFormName()
+                applicationName = self._document.getParentApplication().getName()
+                label = '{} - {} #{}'.format(applicationName, formName, '{ETQ$NUMBER}')
+        self._label = self._getFieldsInString(label)    
+    
+    def setMinLevel(self, level):
+        """Set the minimum logging level."""
+        self._minLevel = self._normalizeLevel(level)
+
+    def _normalizeLevel(self, level):
+        """Convert 'information' → 'info', return canonical level"""
+        level = level.lower()
+        for canonical, info in self.LEVEL_MAP.items():
+            if level in info['aliases']:
+                return canonical
+        return 'debug'  # default
+    
+    def _getLevelIndex(self, level):
+        """Get numeric index for level comparison."""
+        canonical = self._normalizeLevel(level)
+        try:
+            return self.LEVEL_ORDER.index(canonical)
+        except ValueError:
+            return 0  # default to debug
+        
+    def _shouldLog(self, level):
+        """
+        Determine if a log message at the given level should be emitted.
+        """
+        if self._minLevel == 'none':
+            return False  # Special case: nothing logs
+        
+        callerIdx = self._getLevelIndex(level)
+        minIdx = self._getLevelIndex(self._minLevel)
+        return callerIdx >= minIdx
 
     def _toUnicode(self, value, encoding='utf-8'):
         """Enhanced unicode conversion with better error handling"""
@@ -37,19 +87,22 @@ class EtqDebug(object):
         output = ''
         document = document if document != None else self._document
         field = document.getField(fieldName)
-        if field != None:
-            fieldSetting = field.getSetting()
-            if fieldSetting.getFieldType() in [fieldSetting.FIELD_TYPE_LINK]:
-                links = field.getDocLinks()
-                if links:
-                   output = separator.join(links.getDescription(field.getLocale(), thisUser.getTimeZone()))
-            elif fieldSetting.getFieldType() not in [fieldSetting.FIELD_TYPE_ATTACHMENT]:
-                #if fieldSetting.isMultiValue():
-                #    output = separator.join(field.getEncodedTextList())
-                #else:
-                output = field.getEncodedDisplayText()
-        else:
+        inputString = '{'+fieldName+'}'
+        if field is None or field.getSetting() is None:
             self.log('Invalid fieldname provided.', 'getField:')
+            return inputString       
+        
+        fieldSetting = field.getSetting()             
+        if fieldSetting.getFieldType() in [fieldSetting.FIELD_TYPE_LINK]:
+            links = field.getDocLinks()
+            if not links:
+                return 'No Links'
+            output = separator.join(links.getDescription(field.getLocale(), thisUser.getTimeZone()))
+        elif fieldSetting.getFieldType() not in [fieldSetting.FIELD_TYPE_ATTACHMENT]:
+            #if fieldSetting.isMultiValue():
+            #    output = separator.join(field.getEncodedTextList())
+            #else:
+            output = field.getEncodedDisplayText()
 
         return output
 
@@ -59,67 +112,123 @@ class EtqDebug(object):
             # No document context to resolve fields, return as is
             return inputString
 
-        if not isinstance(inputString, str):
+        if not isinstance(inputString, basestring):
             # Input is not a string, return the original input
             return inputString
         
         if '{' and '}' in inputString:
             # Inline fields detected
             fieldNames = [i.split('}')[0] for i in inputString.split('{')[1:]]
-            for fieldName in fieldNames:              
+            for fieldName in fieldNames:
+                if ':' in fieldName or ',' in fieldName:
+                    # Not a fieldname, likely a dict
+                    continue
                 inputString = self._toUnicode(inputString).replace('{'+fieldName+'}', self._getField(fieldName, document) )
         return(inputString)
-            
-    def log(self, msg, label=None, multiple = False, enabled=False):
-        if self._enabled or enabled or self._force:
-            output = []
-            if label:
-                label = '{} :: {}'.format(self._label, label)
-            else:
-                label = self._label
 
-            if multiple and (isinstance(msg, list) or isinstance(msg, dict)):
-                if label:
-                    output = ['--{}--'.format(label)]
+    def _getCallerInfo(self, depth=3):
+        """
+        Retrieves caller information using inspect module.
+        """
+        frame = inspect.currentframe()
+        for _ in range(depth):
+            frame = frame.f_back
+            if frame is None:
+                return ''
+        
+        code = frame.f_code
 
-                if label and isinstance(msg, dict):
-                    output.extend([item for key, value in msg.items() for item in [key + ':', value]])
-                        
-                if label and isinstance(msg, list):
-                    # output.extend([item for index, value in enumerate(msg) for item in [label + ' - ' + str(index) + ':', value]])      
-                    output.extend([item for index, value in enumerate(msg) for item in ['{} - {}:{}'.format(label,str(index),value)]])      
-                          
-            else:
-                output = [msg]
-                if label and isinstance(msg, str):
-                    output = [label + ': ' + msg]
+        # Get class name if available
+        className = ''
+        try:
+            loc = frame.f_locals
+            if 'self' in loc and loc['self'] is not None:
+                className = loc['self'].__class__.__name__
+        except Exception:
+            pass
+
+        if code.co_name == '<module>':
+            return ''
+        
+        # Get parameters
+        try:
+            args, varargs, varkw, localsDict = inspect.getargvalues(frame)
+            funcArgs = {}
+
+            # Positional/named args: skip self instead of including it
+            for name in args:
+                if name == 'self':
+                    continue
+                funcArgs[name] = localsDict.get(name)
+
+            # *args
+            if varargs and varargs != 'self':
+                funcArgs[varargs] = localsDict.get(varargs)
+
+            # **kwargs
+            if varkw and varkw != 'self':
+                funcArgs[varkw] = localsDict.get(varkw)
+        except Exception:
+            funcArgs = {}
+        argString = ', '.join('{}={}'.format(k, repr(v)) for k, v in funcArgs.items())
+
+        lineNumber = frame.f_lineno
+        funcName = code.co_name or ''
+
+        if className:
+            funcName = '{}.{}'.format(className, funcName)
+
+        output = '\n{}() line={}:\n    params: {}'.format(funcName, lineNumber, argString)
+
+        return output
+    
+    def _getMessageHeader(self, level, showCaller=True):
+        levelAlias = self.LEVEL_MAP[level]['display']
+        header = '\n[{}] {}'.format(levelAlias, self._label)     
+        if showCaller:
+            header += self._getCallerInfo()
+        return header
+
+    def _formatMessage(self, msg, label, messageList, multiple=False):
+        """
+        Formats a message and label and appends it to the message list.
+        If msg is a string, it combines the label and message.
+        Otherwise, it appends the label (if any) and the message separately.
+        """        
+        if multiple:
+            # Treat iterable elements as separate messages using new lines
+            multipleList = []
+            try:
+                if isinstance(msg, dict):
+                    for key, value in msg.items():
+                        self._formatMessage(value, key, multipleList)
                 else:
-                    output = [label, msg]
+                    for index, value in enumerate(msg):
+                        self._formatMessage(value, str(index), multipleList)
+            except Exception as e:
+                messageList.append('Format error: {}'.format(str(e)))
+
+            if multipleList:
+                msg = '\n    ' + '\n    '.join(multipleList)
+                
+        if not label:
+            label = 'msg'
+        messageList.append('    {}: {}'.format(label, msg))
+
+    def log(self, msg, label=None, multiple = False, enabled=False, document=None, level='debug', showCaller=True):
+        if self._shouldLog(level) or enabled:
+            output = []
+            header = self._getMessageHeader(level=level, showCaller=showCaller)
+
+            self._formatMessage(msg, label, output, multiple=multiple)
 
             for line in output:
-                Rutilities.debug(self._getFieldsInString(line))
+                Rutilities.debug(self._getFieldsInString(header + '\n' + line, document=document))
     
-    def alert(self, msg, label=None, multiple = False, document=None, enabled=False):
-        if (self._enabled or enabled or self._force) and document is not None:
+    def alert(self, msg, label=None, multiple = False, document=None, level='debug', enabled=False):
+        if self._shouldLog(level) or enabled:
             output = []
-            if label:
-                label = '{} :: {}'.format(self._label, label)
-            else:
-                label = self._label
-
-            if multiple and (isinstance(msg, list) or isinstance(msg, dict)):
-                if label:
-                    output = ['--{}--'.format(label)]
-
-                if label and isinstance(msg, dict):
-                    output.extend([item for key, value in msg.items() for item in [key + ':', value]])
-                        
-                if label and isinstance(msg, list):
-                    # output.extend([item for index, value in enumerate(msg) for item in [label + ' - ' + str(index) + ':', value]])      
-                    output.extend([item for index, value in enumerate(msg) for item in ['{} - {}:{}'.format(label,str(index),value)]])      
-                          
-            else:
-                output = [label + ': ' + str(msg)]
+            self._formatMessage(msg, label, output, multiple=multiple)
 
             for line in output:
                 document.addWarning(line)  
@@ -230,7 +339,7 @@ class EtqDebug(object):
         scopeLocals = kwargs.pop('locals', {})
 
 
-        if not self._enabled:
+        if not self._shouldLog('debug'):
             if isString:
                 # Execute normally if profiling is disabled
                 exec(codeOrFunc, scopeGlobals, scopeLocals)
@@ -238,7 +347,7 @@ class EtqDebug(object):
             else:
                 return codeOrFunc(*args, **kwargs)
 
-        # --- Imports needed ONLY if self._enabled is True ---    
+        # --- Imports needed ONLY if we are allowed to log ---    
         from StringIO import StringIO 
         import profile
         import pstats
