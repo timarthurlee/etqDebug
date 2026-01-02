@@ -8,13 +8,18 @@ class EtqDebug(object):
         'error': {'display': 'ERROR', 'aliases': ['error']},
         'none': {'display': 'NONE', 'aliases': ['none', 'off', 'disabled']}
     }     
-    def __init__(self, label=None, minLevel=None, document=None):              
+    def __init__(self, label=None, minLevel=None, document=None, enabled=True):              
         env = engineConfig.getEnvironmentName()        
         isProd = env.lower() in ['production', 'prod']
         
         # Default minimum level (e.g., from config)
         if minLevel is None:
             minLevel = 'debug' if (not isProd or thisUser.isMember('ADMINISTRATORS',None)) else 'error'
+
+        # Add backwards compatability by giving a purpose to the enabled parameter
+        if not enabled:
+            # disable if enabled is set to False
+            minLevel = 'none'
 
         self.setMinLevel(minLevel)
 
