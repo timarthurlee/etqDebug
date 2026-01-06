@@ -8,7 +8,7 @@ class EtqDebug(object):
         'error': {'display': 'ERROR', 'aliases': ['error']},
         'none': {'display': 'NONE', 'aliases': ['none', 'off', 'disabled']}
     }     
-    def __init__(self, label=None, minLevel=None, document=None, enabled=True):              
+    def __init__(self, label=None, minLevel=None, document=None, enabled=True, **kwargs):              
         env = engineConfig.getEnvironmentName()        
         isProd = env.lower() in ['production', 'prod']
         
