@@ -125,7 +125,7 @@ class EtqDebug(object):
             # Inline fields detected
             fieldNames = [i.split('}')[0] for i in inputString.split('{')[1:]]
             for fieldName in fieldNames:
-                if ':' in fieldName or ',' in fieldName:
+                if ':' in fieldName or ',' in fieldName or fieldName == '':
                     # Not a fieldname, likely a dict
                     continue
                 inputString = self._toUnicode(inputString).replace('{'+fieldName+'}', self._getField(fieldName, document) )
