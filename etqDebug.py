@@ -131,7 +131,7 @@ class EtqDebug(object):
                 inputString = self._toUnicode(inputString).replace('{'+fieldName+'}', self._getField(fieldName, document) )
         return(inputString)
 
-    def _getCallerInfo(self, depth=3):
+    def _getCallerInfo(self, depth=3, delimiter='\n'):
         """
         Retrieves caller information using inspect module.
         """
@@ -183,18 +183,18 @@ class EtqDebug(object):
         if className:
             funcName = '{}.{}'.format(className, funcName)
 
-        output = '\n{}() line={}:\n    params: {}'.format(funcName, lineNumber, argString)
+        output = '{}{}() line={}:{}    params: {}'.format(delimiter, funcName, lineNumber, delimiter, argString)
 
         return output
     
-    def _getMessageHeader(self, level, showCaller=True):
+    def _getMessageHeader(self, level, showCaller=True, delimiter='\n'):
         levelAlias = self.LEVEL_MAP[level]['display']
-        header = '\n[{}] {}'.format(levelAlias, self._label)     
+        header = '{}[{}] {}'.format(delimiter, levelAlias, self._label)     
         if showCaller:
-            header += self._getCallerInfo()
+            header += self._getCallerInfo(delimiter=delimiter)
         return header
 
-    def _formatMessage(self, msg, label, messageList, multiple=False):
+    def _formatMessage(self, msg, label, messageList, multiple=False, delimiter='\n', indent='    '):
         """
         Formats a message and label and appends it to the message list.
         If msg is a string, it combines the label and message.
@@ -214,11 +214,11 @@ class EtqDebug(object):
                 messageList.append('Format error: {}'.format(str(e)))
 
             if multipleList:
-                msg = '\n    ' + '\n    '.join(multipleList)
+                msg = delimiter + indent + (delimiter + indent).join(multipleList)
                 
         if not label:
             label = 'msg'
-        messageList.append('    {}: {}'.format(label, msg))
+        messageList.append(indent+'{}: {}'.format(label, msg))
 
     def log(self, msg, label=None, multiple = False, enabled=False, document=None, level='debug', showCaller=True):
         if self._shouldLog(level) or enabled:
@@ -237,6 +237,116 @@ class EtqDebug(object):
 
             for line in output:
                 document.addWarning(line)  
+
+    def email(self, msg, label=None, subject=None, toEmails=None, toUserIds=None, toGroup='DEVELOPERS', copyToEmails=None, copyUserIds=None, multiple=False, document=None, level='debug', enabled=False, includeCaller=True, sendFailureNotification=True, priority=None):
+        """
+        Send a debug email using PublicMail / PublicMailSender.
+
+        msg:
+            - Single value or dict/list if multiple=True (same semantics as log())
+        subject:
+            - Optional override; if None a subject will be generated from level + label
+        toEmails:
+            - List of plain email strings
+        toUserIds:
+            - List of user IDs (ints) whose emails will be resolved by the platform
+        toGroup:
+            - Optional group Design Name (str) whose members will be resolved by the platform
+        copyToEmails / copyUserIds:
+            - Optional CC recipients
+        document:
+            - Optional document context used for field resolution in header/body
+        level:
+            - One of 'debug','info','warn','error','none'
+        enabled:
+            - Force send even if level is below minLevel
+        includeCaller:
+            - Include caller/params block in body
+        sendFailureNotification:
+            - If true, request delivery-failure email on errors
+        priority:
+            - Optional PublicMailSender.HIGHPRIORITY / NORMALPRIORITY / LOWPRIORITY
+        """
+        # respect logging level unless explicitly enabled
+        if not (self._shouldLog(level) or enabled):
+            return
+
+        document = document if document is not None else self._document
+
+        # ----- build header / message lines (reuse existing behavior) -----
+        header = self._getMessageHeader(level=self._normalizeLevel(level), showCaller=includeCaller, delimiter='<br>')
+
+        messageLines = []
+        self._formatMessage(msg, label, messageList=messageLines, multiple=multiple, delimiter='<br>', indent='&nbsp;&nbsp;&nbsp;&nbsp;')
+
+        # join into a single body string
+        bodyParts = []
+        bodyParts.append(self._getFieldsInString(header, document=document))
+        for line in messageLines:
+            bodyParts.append(self._getFieldsInString(line, document=document))
+        body = u'<br>'.join(bodyParts)
+
+        # ----- build subject -----
+        if subject is None:
+            levelAlias = self.LEVEL_MAP[self._normalizeLevel(level)]['display']
+            # try to inject ETQ number safely when document context exists
+            etqNumberText = ''            
+            if document is not None:
+                # encoded value is allowed in email contexts [file:1]
+                etqNumberText = document.getField('ETQ$NUMBER', True).getEncodedValue()
+                if etqNumberText in self._label:
+                    etqNumberText = ''  # already included
+
+            subject = u'[{}] {}{}'.format(levelAlias, self._label, ' - {}'.format(etqNumberText) if etqNumberText else '')
+
+        subject = self._toUnicode(subject)
+
+        # ----- create and populate PublicMail -----
+        mailObj = PublicMail()
+            
+        if toUserIds:
+            mailObj.setToUserIDs(toUserIds)
+        elif toEmails:
+            mailObj.setToEmails(toEmails)
+        else:            
+            groupProfile = PublicECCProfileManager().getUserProfile(toGroup)
+            if groupProfile is not None:
+                mailObj.setToUserIDs([groupProfile.getID()])
+            else:
+                self.log('email failed: invalid toGroup "{}"'.format(toGroup), level='error')
+                return  # cannot proceed without recipients
+
+        if copyToEmails:
+            mailObj.setCopyToEmails(copyToEmails)
+        if copyUserIds:
+            mailObj.setCopyUserIDs(copyUserIds)
+
+        # subject and body
+        mailObj.setSubject(subject)
+        mailObj.setBody(body)
+
+        # link current document (if any) so email contains a standard document link [file:1][file:2]
+        if document is not None:
+            mailObj.setPublicDocument(document)
+
+        # priority (optional)
+        if priority is not None:
+            mailObj.setPriority(priority)
+
+        # set sender to current user when possible
+        if thisUser is not None and bool(thisUser.getEmail()):
+            # using user ID is usually safer because email can be maintained in the profile [file:2]            
+            mailObj.setSenderUserID(int(thisUser.getID()))    
+        else:
+            # fallback to from email if user context is missing
+            mailObj.setSenderEmail('no-reply-notifications@etq.com')   
+
+        # ----- send the email -----
+        try:
+            PublicMailSender.sendEmail(mailObj, sendFailureNotification)
+        except Exception as e:
+            # fall back to standard debug logging if email fails
+            self.log('sendEmail failed: {}'.format(str(e)), 'EtqDebug.email', level='error')
 
     def databaseTableInfo(self, tableName, schemaName='dbo', includeRowCount=True, filterOnlyDataSource='FILTER_ONLY', filterName='VAR$FILTER'):
         """
