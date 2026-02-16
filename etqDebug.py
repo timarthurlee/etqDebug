@@ -52,10 +52,14 @@ class EtqDebug(object):
         except ValueError:
             return 0  # default to debug
         
-    def _shouldLog(self, level):
+    def _shouldLog(self, level, enabled=None):
         """
         Determine if a log message at the given level should be emitted.
         """
+        if enabled is not None:
+            # If enabled is explicitly set, log if it's True or if level is 'error'
+            return enabled or self._getLevelIndex(level) >= self._getLevelIndex('error')
+
         if self._minLevel == 'none':
             return False  # Special case: nothing logs
         
@@ -220,8 +224,8 @@ class EtqDebug(object):
             label = 'msg'
         messageList.append(indent+'{}: {}'.format(label, msg))
 
-    def log(self, msg, label=None, multiple = False, enabled=False, document=None, level='debug', showCaller=True):
-        if self._shouldLog(level) or enabled:
+    def log(self, msg, label=None, multiple = False, enabled=None, document=None, level='debug', showCaller=True):    
+        if self._shouldLog(level, enabled=enabled):
             output = []
             header = self._getMessageHeader(level=level, showCaller=showCaller)
 
@@ -231,7 +235,7 @@ class EtqDebug(object):
                 Rutilities.debug(self._getFieldsInString(header + '\n' + line, document=document))
     
     def alert(self, msg, label=None, multiple = False, document=None, level='debug', enabled=False):
-        if self._shouldLog(level) or enabled:
+        if self._shouldLog(level, enabled=enabled):
             output = []
             self._formatMessage(msg, label, output, multiple=multiple)
 
