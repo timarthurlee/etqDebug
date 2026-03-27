@@ -198,7 +198,7 @@ class EtqDebug(object):
             header += self._getCallerInfo(delimiter=delimiter)
         return header
 
-    def _formatMessage(self, msg, label, messageList, multiple=False, delimiter='\n', indent='    '):
+    def _formatMessage(self, msg, label, messageList, multiple=False, delimiter='\n', indent='    ', multipleShowIndex=True):
         """
         Formats a message and label and appends it to the message list.
         If msg is a string, it combines the label and message.
@@ -213,23 +213,23 @@ class EtqDebug(object):
                         self._formatMessage(value, key, multipleList)
                 else:
                     for index, value in enumerate(msg):
-                        self._formatMessage(value, str(index), multipleList)
+                        self._formatMessage(value, str(index) if multipleShowIndex else '', multipleList)
             except Exception as e:
                 messageList.append('Format error: {}'.format(str(e)))
 
             if multipleList:
                 msg = delimiter + indent + (delimiter + indent).join(multipleList)
                 
-        if not label:
+        if label is None:
             label = 'msg'
-        messageList.append(indent+'{}: {}'.format(label, msg))
+        messageList.append(indent+'{}{}'.format('{}: '.format(label) if label else '', msg))
 
-    def log(self, msg, label=None, multiple = False, enabled=None, document=None, level='debug', showCaller=True):    
+    def log(self, msg, label=None, multiple = False, enabled=None, document=None, level='debug', showCaller=True, multipleShowIndex=True):    
         if self._shouldLog(level, enabled=enabled):
             output = []
             header = self._getMessageHeader(level=level, showCaller=showCaller)
 
-            self._formatMessage(msg, label, output, multiple=multiple)
+            self._formatMessage(msg, label, output, multiple=multiple, multipleShowIndex=multipleShowIndex)
 
             for line in output:
                 Rutilities.debug(self._getFieldsInString(header + '\n' + line, document=document))
@@ -242,7 +242,7 @@ class EtqDebug(object):
             for line in output:
                 document.addWarning(line)  
 
-    def email(self, msg, label=None, subject=None, toEmails=None, toUserIds=None, toGroup='DEVELOPERS', copyToEmails=None, copyUserIds=None, multiple=False, document=None, level='debug', enabled=False, includeCaller=True, sendFailureNotification=True, priority=None):
+    def email(self, msg, label=None, subject=None, toEmails=None, toUserIds=None, toGroup='DEVELOPERS', copyToEmails=None, copyUserIds=None, multiple=False, document=None, level='debug', enabled=False, includeCaller=True, sendFailureNotification=True, priority=None, multipleShowIndex=True):
         """
         Send a debug email using PublicMail / PublicMailSender.
 
@@ -272,7 +272,7 @@ class EtqDebug(object):
             - Optional PublicMailSender.HIGHPRIORITY / NORMALPRIORITY / LOWPRIORITY
         """
         # respect logging level unless explicitly enabled
-        if not (self._shouldLog(level) or enabled):
+        if not self._shouldLog(level, enabled=enabled):
             return
 
         document = document if document is not None else self._document
@@ -281,7 +281,7 @@ class EtqDebug(object):
         header = self._getMessageHeader(level=self._normalizeLevel(level), showCaller=includeCaller, delimiter='<br>')
 
         messageLines = []
-        self._formatMessage(msg, label, messageList=messageLines, multiple=multiple, delimiter='<br>', indent='&nbsp;&nbsp;&nbsp;&nbsp;')
+        self._formatMessage(msg, label, messageList=messageLines, multiple=multiple, delimiter='<br>', indent='&nbsp;&nbsp;&nbsp;&nbsp;', multipleShowIndex=multipleShowIndex)
 
         # join into a single body string
         bodyParts = []
