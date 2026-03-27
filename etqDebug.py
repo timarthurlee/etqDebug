@@ -425,7 +425,83 @@ class EtqDebug(object):
         except Exception as e:
             self.log("Failed to fetch info for {}.{}: {}".format(schemaName, tableName, str(e)), label="databaseTableInfo", enabled=True)
             return {}
-        
+
+    def executeQuery(self, queryOrDao, title='Query Results', columns=None, output='log', maxRows=100, align='center', includeRowCount=True, filterOnlyDataSource='FILTER_ONLY', filterName='VAR$FILTER', level='debug'):
+        """
+        Logs/emails formatted query or dao results as pipe table.
+        - output: 'log' (default), 'email'
+        - cols: ['COL1'] → explicit (auto-infer otherwise)
+        """
+        try:
+            if isinstance(queryOrDao, basestring):                
+                # If a SQL string was passed, execute it
+                queryString = queryOrDao
+                dao = thisApplication.executeQueryFromDatasource(filterOnlyDataSource, {filterName: queryString})
+            else:
+                dao = queryOrDao
+
+            if not dao:
+                self.log('No results or invalid dao', title)
+                return
+            
+            if not columns:
+                self.log('No columns provided', title)
+                return       
+
+            columnSizes = [len(col) for col in columns]
+            
+            rowCount = 0
+            rowData = []
+            totalRows = dao.count()
+            while dao.next() and rowCount < maxRows:
+                row = []
+                for i, column in enumerate(columns):
+                    val = str(dao.getValue(column) or '')[:100]
+                    columnSizes[i] = max(columnSizes[i], len(val))
+                    row.append(val)
+                rowData.append(row)
+                rowCount += 1
+                
+            if output == 'log':           
+                alignFunc = {
+                    'left': lambda s, w: s.ljust(w),
+                    'center': lambda s, w: s.center(w),
+                    'right': lambda s, w: s.rjust(w)
+                }[align]
+                
+                pad = lambda s, i: alignFunc(s, columnSizes[i])
+
+                lines = []
+                if includeRowCount:
+                    lines.append('Row Count: {}{}'.format(totalRows, ' (showing {})'.format(min(rowCount, maxRows)) if totalRows > maxRows else ''))
+                headerRow = ['| ' + ' | '.join(pad(columns[i], i) for i in range(len(columns))) + ' |']
+                sepRow = ['| ' + ' | '.join('-'*w for w in columnSizes) + ' |']
+                bodyRows = ['| ' + ' | '.join(pad(row[i], i) for i in range(len(row))) + ' |' for row in rowData]
+                
+                if rowCount >= maxRows:
+                    bodyRows.append('... ({}+ rows)'.format(maxRows))
+                
+                lines += headerRow + sepRow + bodyRows
+                
+                if output == 'log':
+                    self.log(lines, title, multiple=True, level=level, multipleShowIndex=False, enabled=True)
+            
+            elif output == 'email':
+                #todo
+                # lines = [','.join(columns)]
+                # for row in rowData:
+                #     safeRow = [str(val).replace(',', ';') for val in row]
+                #     lines.append(','.join(safeRow))
+                # return '\n'.join(lines)
+                # attach = PublicAttachment()
+                # attach.setFileName(filename)
+                # attach.setContent(csvContent)
+                # self.email(lines, title, multiple=True, multipleShowIndex=False, enabled=True)
+                return
+
+        except Exception as e:
+            self.log(str(e), label='daoTable failed', level='error', enabled=True)
+
     def profileCode(self, codeOrFunc, *args, **kwargs):
         """
         Profiles either a function/method (using runcall) or a string of code (using runctx).
