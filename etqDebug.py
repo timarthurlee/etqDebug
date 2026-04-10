@@ -426,27 +426,45 @@ class EtqDebug(object):
             self.log("Failed to fetch info for {}.{}: {}".format(schemaName, tableName, str(e)), label="databaseTableInfo", enabled=True)
             return {}
 
-    def executeQuery(self, queryOrDao, title='Query Results', columns=None, output='log', maxRows=100, align='center', includeRowCount=True, filterOnlyDataSource='FILTER_ONLY', filterName='VAR$FILTER', level='debug'):
+    def executeQuery(self, query, title='Query Results', output='log', maxRows=100, align='center', includeRowCount=True, level='debug', **kwargs):
         """
-        Logs/emails formatted query or dao results as pipe table.
+        Logs/emails formatted query results as piped table.
         - output: 'log' (default), 'email'
-        - cols: ['COL1'] → explicit (auto-infer otherwise)
+        - Deprecated kwargs (accepted but ignored): columns, filterOnlyDataSource, filterName
         """
+        from com.etq.reliance.dao import DaoFactory
+        dao = None    
         try:
-            if isinstance(queryOrDao, basestring):                
-                # If a SQL string was passed, execute it
-                queryString = queryOrDao
-                dao = thisApplication.executeQueryFromDatasource(filterOnlyDataSource, {filterName: queryString})
-            else:
-                dao = queryOrDao
-
-            if not dao:
-                self.log('No results or invalid dao', title)
+            if not isinstance(query, basestring):                
+                self.log('Invalid query type', title)
                 return
-            
-            if not columns:
-                self.log('No columns provided', title)
-                return       
+
+            dao = DaoFactory.getInstance().getDao(thisApplication.getName())
+            dao.execute(query)
+               
+            columns = []
+            columnCount = dao.getColumnCount()
+            if columnCount == 0:
+                self.log('No columns found', title)
+                return
+
+            for i in range(columnCount):
+                column = dao.getColumn(i)
+                columns.append(column.getName())
+
+            # Detect duplicate column names (e.g. from SELECT * with JOINs)
+            if len(columns) != len(set(columns)):
+                seen = {}
+                for col in columns:
+                    seen[col] = seen.get(col, 0) + 1
+                dupes = [col for col, count in seen.items() if count > 1]
+                self.log(
+                    'Duplicate column name(s) detected - rewrite query using explicit SELECT aliases: {}'.format(dupes),
+                    title, level='warn', enabled=True
+                )
+                return
+
+            self.log('Columns: {}'.format(columns))
 
             columnSizes = [len(col) for col in columns]
             
@@ -462,7 +480,7 @@ class EtqDebug(object):
                 rowData.append(row)
                 rowCount += 1
                 
-            if output == 'log':           
+            if output in ['log', 'return']:           
                 alignFunc = {
                     'left': lambda s, w: s.ljust(w),
                     'center': lambda s, w: s.center(w),
@@ -478,13 +496,15 @@ class EtqDebug(object):
                 sepRow = ['| ' + ' | '.join('-'*w for w in columnSizes) + ' |']
                 bodyRows = ['| ' + ' | '.join(pad(row[i], i) for i in range(len(row))) + ' |' for row in rowData]
                 
-                if rowCount >= maxRows:
-                    bodyRows.append('... ({}+ rows)'.format(maxRows))
+                if totalRows > maxRows:
+                    bodyRows.append('...')
                 
                 lines += headerRow + sepRow + bodyRows
                 
-                if output == 'log':
+                if output == 'log':                    
                     self.log(lines, title, multiple=True, level=level, multipleShowIndex=False, enabled=True)
+                elif output =='return':
+                    return lines
             
             elif output == 'email':
                 #todo
@@ -501,6 +521,10 @@ class EtqDebug(object):
 
         except Exception as e:
             self.log(str(e), label='daoTable failed', level='error', enabled=True)
+
+        finally:
+            if dao is not None:
+                dao.closeDatabaseConnection()
 
     def profileCode(self, codeOrFunc, *args, **kwargs):
         """
