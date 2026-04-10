@@ -477,10 +477,13 @@ class EtqDebug(object):
                     val = str(dao.getValue(column) or '')[:100]
                     columnSizes[i] = max(columnSizes[i], len(val))
                     row.append(val)
-                rowData.append(row)
+                rowData.append(tuple(row))
                 rowCount += 1
-                
-            if output in ['log', 'return']:           
+
+            if output =='return':
+                return columns, rowData            
+            
+            elif output == 'log':           
                 alignFunc = {
                     'left': lambda s, w: s.ljust(w),
                     'center': lambda s, w: s.center(w),
@@ -501,10 +504,7 @@ class EtqDebug(object):
                 
                 lines += headerRow + sepRow + bodyRows
                 
-                if output == 'log':                    
-                    self.log(lines, title, multiple=True, level=level, multipleShowIndex=False, enabled=True)
-                elif output =='return':
-                    return lines
+                self.log(lines, title, multiple=True, level=level, multipleShowIndex=False, enabled=True)           
             
             elif output == 'email':
                 #todo
