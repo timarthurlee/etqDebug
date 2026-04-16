@@ -1,4 +1,4 @@
-import inspect
+import traceback
 class EtqDebug(object):
     LEVEL_ORDER = ['debug', 'info', 'warn', 'error', 'none']
     LEVEL_MAP = {
@@ -8,7 +8,7 @@ class EtqDebug(object):
         'error': {'display': 'ERROR', 'aliases': ['error']},
         'none': {'display': 'NONE', 'aliases': ['none', 'off', 'disabled']}
     }     
-    def __init__(self, label=None, minLevel=None, document=None, enabled=True, **kwargs):              
+    def __init__(self, label=None, minLevel=None, document=None, enabled=True, className=None, **kwargs):              
         env = engineConfig.getEnvironmentName()        
         isProd = env.lower() in ['production', 'prod']
         
@@ -24,6 +24,8 @@ class EtqDebug(object):
         self.setMinLevel(minLevel)
 
         self._document = thisDocument if document is None else document
+
+        self.className = className
 
         if not label:
             if self._document is not None:
@@ -135,67 +137,37 @@ class EtqDebug(object):
                 inputString = self._toUnicode(inputString).replace('{'+fieldName+'}', self._getField(fieldName, document) )
         return(inputString)
 
-    def _getCallerInfo(self, depth=3, delimiter='\n'):
+    def _getCallerInfo(self, depth=3, delimiter='\n', className=None):
         """
         Retrieves caller information using inspect module.
         """
-        frame = inspect.currentframe()
-        for _ in range(depth):
-            frame = frame.f_back
-            if frame is None:
-                return ''
-        
-        code = frame.f_code
-
-        # Get class name if available
-        className = ''
-        try:
-            loc = frame.f_locals
-            if 'self' in loc and loc['self'] is not None:
-                className = loc['self'].__class__.__name__
-        except Exception:
-            pass
-
-        if code.co_name == '<module>':
+        stack = traceback.extract_stack()
+        if len(stack) <= depth + 1:
             return ''
         
-        # Get parameters
-        try:
-            args, varargs, varkw, localsDict = inspect.getargvalues(frame)
-            funcArgs = {}
+        frame = stack[-depth - 1]  # 3 levels up
 
-            # Positional/named args: skip self instead of including it
-            for name in args:
-                if name == 'self':
-                    continue
-                funcArgs[name] = localsDict.get(name)
+        if not className and hasattr(self, 'className'):
+            className = self.className
+        
+        lineNumber = frame[1]
+        funcName = frame[2] or ''
 
-            # *args
-            if varargs and varargs != 'self':
-                funcArgs[varargs] = localsDict.get(varargs)
-
-            # **kwargs
-            if varkw and varkw != 'self':
-                funcArgs[varkw] = localsDict.get(varkw)
-        except Exception:
-            funcArgs = {}
-        argString = ', '.join('{}={}'.format(k, repr(v)) for k, v in funcArgs.items())
-
-        lineNumber = frame.f_lineno
-        funcName = code.co_name or ''
-
+        if funcName == '<module>':
+            return ''
+        
         if className:
             funcName = '{}.{}'.format(className, funcName)
 
-        output = '{}{}() line={}:{}    params: {}'.format(delimiter, funcName, lineNumber, delimiter, argString)
+        output = '{}{}() line={}:'.format(delimiter, funcName, lineNumber)
 
         return output
     
-    def _getMessageHeader(self, level, showCaller=True, delimiter='\n'):
+    def _getMessageHeader(self, level, showCaller=True, delimiter='\n', className=None):
         levelAlias = self.LEVEL_MAP[level]['display']
         header = '{}[{}] {}'.format(delimiter, levelAlias, self._label)     
         if showCaller:
-            header += self._getCallerInfo(delimiter=delimiter)
+            header += self._getCallerInfo(delimiter=delimiter, className=className)
         return header
 
     def _formatMessage(self, msg, label, messageList, multiple=False, delimiter='\n', indent='    ', multipleShowIndex=True):
@@ -224,10 +196,10 @@ class EtqDebug(object):
             label = 'msg'
         messageList.append(indent+'{}{}'.format('{}: '.format(label) if label else '', msg))
 
-    def log(self, msg, label=None, multiple = False, enabled=None, document=None, level='debug', showCaller=True, multipleShowIndex=True):    
+    def log(self, msg, label=None, multiple = False, enabled=None, document=None, level='debug', showCaller=True, multipleShowIndex=True, className=None):    
         if self._shouldLog(level, enabled=enabled):
             output = []
-            header = self._getMessageHeader(level=level, showCaller=showCaller)
+            header = self._getMessageHeader(level=level, showCaller=showCaller, className=className)
 
             self._formatMessage(msg, label, output, multiple=multiple, multipleShowIndex=multipleShowIndex)
 
@@ -242,7 +214,7 @@ class EtqDebug(object):
             for line in output:
                 document.addWarning(line)  
 
-    def email(self, msg, label=None, subject=None, toEmails=None, toUserIds=None, toGroup='DEVELOPERS', copyToEmails=None, copyUserIds=None, multiple=False, document=None, level='debug', enabled=False, includeCaller=True, sendFailureNotification=True, priority=None, multipleShowIndex=True):
+    def email(self, msg, label=None, subject=None, toEmails=None, toUserIds=None, toGroup='DEVELOPERS', copyToEmails=None, copyUserIds=None, multiple=False, document=None, level='debug', enabled=False, includeCaller=True, sendFailureNotification=True, priority=None, multipleShowIndex=True, className=None):
         """
         Send a debug email using PublicMail / PublicMailSender.
 
@@ -278,7 +250,7 @@ class EtqDebug(object):
         document = document if document is not None else self._document
 
         # ----- build header / message lines (reuse existing behavior) -----
-        header = self._getMessageHeader(level=self._normalizeLevel(level), showCaller=includeCaller, delimiter='<br>')
+        header = self._getMessageHeader(level=self._normalizeLevel(level), showCaller=includeCaller, delimiter='<br>', className=className)
 
         messageLines = []
         self._formatMessage(msg, label, messageList=messageLines, multiple=multiple, delimiter='<br>', indent='&nbsp;&nbsp;&nbsp;&nbsp;', multipleShowIndex=multipleShowIndex)
